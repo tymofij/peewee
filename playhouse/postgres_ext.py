@@ -159,10 +159,24 @@ class ArrayField(IndexedFieldMixin, Field):
         return NodeList((data_type, SQL('[]' * self.dimensions)), glue='')
 
     def db_value(self, value):
-        if value is not None:
-            if isinstance(value, (list, Node)):
-                return value
+        if value is None or isinstance(value, Node):
+            return value
+        elif isinstance(value, (list, tuple)):
+            return self._process(self.__field.db_value, value, self.dimensions)
+        else:
             return list(value)
+
+    def python_value(self, value):
+        if value is None or not isinstance(value, list):
+            return self.__field.python_value(value)
+        return self._process(self.__field.python_value, value, self.dimensions)
+
+    def _process(self, conv, value, dimensions):
+        dimensions -= 1
+        if dimensions == 0:
+            return map(conv, value)
+        else:
+            return [self._process(conv, v, dimensions) for v in value]
 
     def __getitem__(self, value):
         return ObjectSlice.create(self, value)
