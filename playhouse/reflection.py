@@ -77,7 +77,7 @@ class Column(object):
             params['null'] = True
         if self.field_class is ForeignKeyField or self.name != self.column_name:
             params['column_name'] = "'%s'" % self.column_name
-        if self.primary_key and self.field_class is not AutoField:
+        if self.primary_key and not issubclass(self.field_class, AutoField):
             params['primary_key'] = True
 
         # Handle ForeignKeyField-specific attributes.
@@ -164,22 +164,36 @@ class Metadata(object):
             pk = pk_names[0]
             if column_types[pk] is IntegerField:
                 column_types[pk] = AutoField
+            elif column_types[pk] is BigIntegerField:
+                column_types[pk] = BigAutoField
 
         columns = OrderedDict()
         for name, column_data in metadata.items():
+            field_class = column_types[name]
+            field_params = extra_params.get(name) or {}
+            self.apply_default(column_data, field_class, field_params)
+
             columns[name] = Column(
                 name,
-                field_class=column_types[name],
+                field_class=field_class,
                 raw_column_type=column_data.data_type,
                 nullable=column_data.null,
                 primary_key=column_data.primary_key,
                 column_name=name,
-                extra_parameters=extra_params.get(name))
+                extra_parameters=field_params)
 
         return columns
 
     def get_column_types(self, table, schema=None):
         raise NotImplementedError
+
+    def apply_default(self, column_data, field_class, params):
+        default = column_data.default
+        if default is None or field_class in (AutoField, BigAutoField):
+            return
+
+        params.setdefault('constraints', [])
+        params['constraints'].append(SQL('DEFAULT %s' % (default or "''")))
 
     def get_foreign_keys(self, table, schema=None):
         return self.database.get_foreign_keys(table, schema)
@@ -651,6 +665,9 @@ class Introspector(object):
                         params['unique'] = True
                     elif not column.is_foreign_key():
                         params['index'] = True
+
+                if column.extra_parameters:
+                    params.update(column.extra_parameters)
 
                 attrs[column.name] = FieldClass(**params)
 

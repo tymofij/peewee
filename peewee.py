@@ -2338,7 +2338,7 @@ IndexMetadata = collections.namedtuple(
     ('name', 'sql', 'columns', 'unique', 'table'))
 ColumnMetadata = collections.namedtuple(
     'ColumnMetadata',
-    ('name', 'data_type', 'null', 'primary_key', 'table'))
+    ('name', 'data_type', 'null', 'primary_key', 'table', 'default'))
 ForeignKeyMetadata = collections.namedtuple(
     'ForeignKeyMetadata',
     ('column', 'dest_table', 'dest_column', 'table'))
@@ -2902,8 +2902,8 @@ class SqliteDatabase(Database):
 
     def get_columns(self, table, schema=None):
         cursor = self.execute_sql('PRAGMA table_info("%s")' % table)
-        return [ColumnMetadata(row[1], row[2], not row[3], bool(row[5]), table)
-                for row in cursor.fetchall()]
+        return [ColumnMetadata(r[1], r[2], not r[3], bool(r[5]), table, r[4])
+                for r in cursor.fetchall()]
 
     def get_primary_keys(self, table, schema=None):
         cursor = self.execute_sql('PRAGMA table_info("%s")' % table)
@@ -3011,14 +3011,14 @@ class PostgresqlDatabase(Database):
 
     def get_columns(self, table, schema=None):
         query = """
-            SELECT column_name, is_nullable, data_type
+            SELECT column_name, is_nullable, data_type, column_default
             FROM information_schema.columns
             WHERE table_name = %s AND table_schema = %s
             ORDER BY ordinal_position"""
         cursor = self.execute_sql(query, (table, schema or 'public'))
         pks = set(self.get_primary_keys(table, schema))
-        return [ColumnMetadata(name, dt, null == 'YES', name in pks, table)
-                for name, null, dt in cursor.fetchall()]
+        return [ColumnMetadata(name, dt, null == 'YES', name in pks, table, df)
+                for name, null, dt, df in cursor.fetchall()]
 
     def get_primary_keys(self, table, schema=None):
         query = """
@@ -3181,13 +3181,13 @@ class MySQLDatabase(Database):
 
     def get_columns(self, table, schema=None):
         sql = """
-            SELECT column_name, is_nullable, data_type
+            SELECT column_name, is_nullable, data_type, column_default
             FROM information_schema.columns
             WHERE table_name = %s AND table_schema = DATABASE()"""
         cursor = self.execute_sql(sql, (table,))
         pks = set(self.get_primary_keys(table))
-        return [ColumnMetadata(name, dt, null == 'YES', name in pks, table)
-                for name, null, dt in cursor.fetchall()]
+        return [ColumnMetadata(name, dt, null == 'YES', name in pks, table, df)
+                for name, null, dt, df in cursor.fetchall()]
 
     def get_primary_keys(self, table, schema=None):
         cursor = self.execute_sql('SHOW INDEX FROM `%s`' % table)
@@ -3690,7 +3690,10 @@ class Field(ColumnBase):
         if self.sequence:
             accum.append(SQL("DEFAULT NEXTVAL('%s')" % self.sequence))
         if self.constraints:
-            accum.extend(self.constraints)
+            for constraint in self.constraints:
+                if not isinstance(constraint, Node):
+                    constraint = SQL(constraint)
+                accum.append(constraint)
         if self.collation:
             accum.append(SQL('COLLATE %s' % self.collation))
         return NodeList(accum)
