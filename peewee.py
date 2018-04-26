@@ -2688,7 +2688,7 @@ class Query(Node):
 
     def __repr__(self):
         sql, params = self.sql()
-        return '%s %s %s' % (self.model_class, sql, params)
+        return '%s %s %s %s' % (self.model_class, self.database,  sql, params)
 
     def clone(self):
         query = type(self)(self.model_class)
